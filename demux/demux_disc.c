@@ -1018,7 +1018,15 @@ static bool d_read_packet(struct demuxer *demuxer, struct demux_packet **out_pkt
         return true;
     }
 
-    if (sh->type == STREAM_SUB) {
+    struct stream_pts_offset_req pts_offset = {.pos = pkt->pos};
+    if (p->is_bd &&
+        stream_control(demuxer->stream, STREAM_CTRL_GET_PTS_OFFSET,
+                       &pts_offset) == STREAM_OK)
+    {
+        // bd_tell_time() describes a video access point, not the first packet
+        // returned after a seek (which may be earlier interleaved audio).
+        apply_tl_offset(pkt, pts_offset.offset);
+    } else if (sh->type == STREAM_SUB) {
         map_sub_packet(demuxer, sh, pkt);
     } else {
         map_av_packet(demuxer, sh, pkt);

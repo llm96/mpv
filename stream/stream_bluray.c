@@ -54,6 +54,7 @@
 #include "video/mp_image.h"
 
 #define BLURAY_SECTOR_SIZE     6144
+#define BLURAY_TS_PACKET_SIZE   192
 
 #define BLURAY_DEFAULT_ANGLE      0
 #define BLURAY_DEFAULT_CHAPTER    0
@@ -153,6 +154,7 @@ struct bluray_priv_s {
     bool still_active;               // holding an indefinite still.
     uint64_t next_read_pos;          // expected bd_tell() of the next read
     bool read_pos_known;             // next_read_pos is valid
+    int64_t title_pos_offset;        // libbluray byte position minus stream position
     bool resync_owed;                // jump settled, resync seek not acked yet
 
     // Disc-driven audio/sub selection, mirrored from BD_EVENT_AUDIO_STREAM
@@ -672,6 +674,8 @@ static int bluray_stream_fill_buffer(stream_t *s, void *buf, int len)
             }
             if (!b->read_pos_known)
                 MP_DBG(s, "reads resume at %"PRIu64"\n", pos - n);
+            // demux_disc rebases the stream's byte position after seeks.
+            b->title_pos_offset = (int64_t)(pos - n) - s->pos;
             b->next_read_pos = pos;
             b->read_pos_known = true;
             if (b->still_active) {
@@ -816,6 +820,29 @@ static int bluray_stream_control(stream_t *s, int cmd, void *arg)
     case STREAM_CTRL_GET_CURRENT_TIME: {
         *((double *) arg) = BD_TIME_TO_S(bd_tell_time(b->bd));
         return STREAM_OK;
+    }
+    case STREAM_CTRL_GET_PTS_OFFSET: {
+        struct stream_pts_offset_req *req = arg;
+        int64_t pos = req->pos + b->title_pos_offset;
+        if (req->pos < 0 || pos < 0)
+            return STREAM_UNSUPPORTED;
+        int ret = STREAM_UNSUPPORTED;
+        mp_mutex_lock(&b->overlay_lock);
+        const BLURAY_TITLE_INFO *ti = b->title_info;
+        uint64_t end = 0;
+        for (unsigned n = 0; ti && n < ti->clip_count; n++) {
+            const BLURAY_CLIP_INFO *clip = &ti->clips[n];
+            end += (uint64_t)clip->pkt_count * BLURAY_TS_PACKET_SIZE;
+            if (pos < end) {
+                // Use the packet's play item, not the current read position:
+                // buffered packets can belong to an earlier clip.
+                req->offset = BD_TIME_TO_S((double)clip->start_time - clip->in_time);
+                ret = STREAM_OK;
+                break;
+            }
+        }
+        mp_mutex_unlock(&b->overlay_lock);
+        return ret;
     }
     case STREAM_CTRL_SEEK_TO_TIME: {
         double pts = *((double *) arg);

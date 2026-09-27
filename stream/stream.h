@@ -82,6 +82,7 @@ enum stream_ctrl {
     STREAM_CTRL_GET_DISC_NAME,
     STREAM_CTRL_GET_NUM_CHAPTERS,
     STREAM_CTRL_GET_CURRENT_TIME,
+    STREAM_CTRL_GET_PTS_OFFSET,     // struct stream_pts_offset_req*
     STREAM_CTRL_GET_CHAPTER_TIME,
     STREAM_CTRL_SEEK_TO_TIME,
     STREAM_CTRL_GET_ASPECT_RATIO,
@@ -101,6 +102,12 @@ enum stream_ctrl {
     STREAM_CTRL_SET_STILL_PAGE,      // int*, force the shown still page
     STREAM_CTRL_NAV_DRAIN_ENABLE,    // start holding EOF at jump boundaries
     STREAM_CTRL_NAV_DRAIN_ACK,       // flush done, release the held EOF
+};
+
+// Map timestamps at a demuxed packet's byte position to the disc timeline.
+struct stream_pts_offset_req {
+    int64_t pos;     // input: packet byte position in the stream, -1 if unknown
+    double offset;  // output: seconds to add to PTS/DTS to get playback time
 };
 
 // Fetch the still image that a disc (DVD-Audio ASVS) associates with the given
